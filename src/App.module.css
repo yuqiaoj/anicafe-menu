@@ -1,0 +1,41 @@
+.flexRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.flexGrow {
+  flex-grow: 1;
+}
+
+.cashPriceContainer {
+  width: 72px;
+  text-align: center;
+}
+
+.cashOptions {
+  display: flex;
+  width: 100%;
+  align-items: start;
+}
+
+.cashSubmit {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.numberButtonContainer {
+  width: 152px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.numberButtonInput {
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+  width: 40px;
+  text-align: center;
+}
