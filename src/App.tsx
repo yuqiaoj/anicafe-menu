@@ -283,7 +283,7 @@ function CashierPage({
       setTotal(calculateTotal(values.items) - values.discount);
     },
     validate: {
-      number: (value) => (value > 0 ? null : "Order number is required"),
+      number: (value: number) => (value > 0 ? null : "Order number is required"),
       discount: () => (total >= 0 ? null : "Discount greater than order total"),
     },
   });
