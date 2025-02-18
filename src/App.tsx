@@ -1,8 +1,8 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Fragment, useEffect, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
 import {
   addDoc,
+  setDoc,
   collection,
   doc,
   getFirestore,
@@ -12,16 +12,15 @@ import {
   where,
   serverTimestamp,
   orderBy,
+  Timestamp,
 } from "firebase/firestore";
 import {
   Button,
   Card,
   Checkbox,
   Group,
-  NumberFormatter,
   NumberInput,
   NumberInputHandlers,
-  ScrollArea,
   SimpleGrid,
   Stack,
   Table,
@@ -36,6 +35,7 @@ import "./App.css";
 import "@mantine/core/styles.css";
 import classes from "./App.module.css";
 import { modals } from "@mantine/modals";
+import { hideNotification, notifications } from "@mantine/notifications";
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -53,7 +53,7 @@ const firebaseConfig = {
 const firebaseapp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseapp);
 
-const dollarFormat = { decimalScale: 2, fixedDecimalScale: true, thousandSeparator: ",", prefix: "$ " };
+const formatPrice = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 interface Menu {
   categories: { categoryName: string; items: { itemName: string; price: number }[] }[];
@@ -61,7 +61,8 @@ interface Menu {
 
 interface Order {
   id?: string;
-  timestamp?: Date;
+  timestamp?: Timestamp;
+  specialtyOnly?: boolean;
   number: number;
   price: number;
   discount: number;
@@ -70,76 +71,187 @@ interface Order {
   categories: { [categoryName: string]: { done: boolean; items: { [itemName: string]: { quantity: number } } } };
 }
 
+interface Specialty {
+  id: string;
+  number: number;
+  notes: string;
+  done: boolean;
+  timestamp: Timestamp;
+  items: { [itemName: string]: { quantity: number } };
+}
+
 function OrderCard({
   order,
+  excludeCategories,
   completeOrder,
-  checkCategory,
+  completeCategory,
 }: {
   order: Order;
-  completeOrder?: (orderId: string) => Promise<void>;
-  checkCategory?: (orderId: string, categoryName: string, value: boolean) => Promise<void>;
+  excludeCategories?: string[];
+  completeOrder?: () => Promise<void>;
+  completeCategory?: "view" | ((orderId: string, categoryName: string, value: boolean) => Promise<void>);
 }) {
   return (
-    <Card shadow="sm" radius="md" p="md">
+    <Card shadow="sm" radius="md" p="md" style={{ height: "420px", display: "flex", flexDirection: "column" }}>
       <Card.Section withBorder>
-        <Group display="flex" justify="space-between" align="center">
+        <Group style={{ display: "flex", justifyContent: "space-between", alignItems: "center", height: "36px" }}>
           <Title order={3}>Order #{order.number}</Title>
-          {completeOrder && order.id && <Button onClick={() => completeOrder(order.id!)}>Complete</Button>}
+          {completeOrder && <Button onClick={completeOrder}>Complete Order</Button>}
         </Group>
-        <Text lineClamp={3} style={{ overflow: "auto", overflowWrap: "break-word", marginTop: "8px", paddingRight: "4px" }}>
-          {order.notes ? `Notes: ${order.notes}` : "No notes"}
-        </Text>
+        {order.notes && (
+          <Text lineClamp={3} style={{ overflow: "auto", overflowWrap: "break-word", marginTop: "8px" }}>
+            {`Notes: ${order.notes}`}
+          </Text>
+        )}
       </Card.Section>
-      <Card.Section withBorder>
-        <ScrollArea h={250} type="auto" offsetScrollbars>
-          <Table>
-            <Table.Tbody>
-              {Object.entries(order.categories)
-                .sort()
-                .map(([categoryName, category]) => (
+      <Card.Section style={{ overflow: "auto" }}>
+        <Table>
+          <Table.Tbody>
+            {Object.entries(order.categories)
+              .sort()
+              .map(([categoryName, category]) =>
+                excludeCategories?.includes(categoryName) ? (
+                  <Fragment key={categoryName}></Fragment>
+                ) : (
                   <Fragment key={categoryName}>
                     <Table.Tr style={{ tableLayout: "fixed" }}>
                       <Table.Th>{categoryName}</Table.Th>
-                      {checkCategory && order.id && (
+                      {completeCategory && order.id && (
                         <Table.Th style={{ display: "flex", justifyContent: "center", width: "40px" }}>
                           <Checkbox
                             checked={category.done}
-                            onChange={(e) => checkCategory(order.id!, categoryName, e.currentTarget.checked)}
+                            onChange={
+                              completeCategory === "view"
+                                ? () => {}
+                                : (e) => completeCategory(order.id!, categoryName, e.currentTarget.checked)
+                            }
                           />
                         </Table.Th>
                       )}
                     </Table.Tr>
-                    {Object.entries(category.items).sort().map(([itemName, item]) => (
-                      <Table.Tr key={itemName}>
-                        <Table.Td style={{ textAlign: "left" }}>{itemName}</Table.Td>
-                        <Table.Td style={{ textAlign: "center", width: "40px" }}>{item.quantity}</Table.Td>
-                      </Table.Tr>
-                    ))}
+                    {Object.entries(category.items)
+                      .sort()
+                      .map(([itemName, item]) => (
+                        <Table.Tr key={itemName}>
+                          <Table.Td style={{ textAlign: "left" }}>{itemName}</Table.Td>
+                          <Table.Td style={{ textAlign: "center", width: "40px" }}>{item.quantity}</Table.Td>
+                        </Table.Tr>
+                      ))}
                   </Fragment>
-                ))}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea>
+                )
+              )}
+          </Table.Tbody>
+        </Table>
       </Card.Section>
     </Card>
   );
 }
 
-function OrderPage({
-  orders,
-  completeOrder,
-  checkCategory,
-}: {
-  orders: Order[];
-  completeOrder: (orderId: string) => Promise<void>;
-  checkCategory: (orderId: string, categoryName: string, value: boolean) => Promise<void>;
-}) {
+function OrderPage() {
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    const unsubscribeOrders = onSnapshot(
+      query(
+        collection(db, "orders"),
+        where("completed", "==", false),
+        where("specialtyOnly", "==", false),
+        orderBy("timestamp")
+      ),
+      (snapshot) => {
+        const ordersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order));
+        setOrders(ordersData);
+      }
+    );
+
+    return () => {
+      unsubscribeOrders();
+    };
+  }, []);
+
+  const checkCategory = async (orderId: string, categoryName: string, value: boolean) => {
+    await updateDoc(doc(db, "orders", orderId), {
+      [`categories.${categoryName}.done`]: value,
+    });
+  };
+
   return (
     <Stack>
       <SimpleGrid cols={{ sm: 2, lg: 3 }} spacing="sm" verticalSpacing="sm">
         {orders.map((order) => (
           <Fragment key={order.id}>
-            <OrderCard order={order} completeOrder={completeOrder} checkCategory={checkCategory} />
+            <OrderCard order={order} excludeCategories={["Specialty"]} completeCategory={checkCategory} />
+          </Fragment>
+        ))}
+      </SimpleGrid>
+    </Stack>
+  );
+}
+
+function VerificationPage() {
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    const unsubscribeOrders = onSnapshot(
+      query(
+        collection(db, "orders"),
+        where("completed", "==", false),
+        where("specialtyOnly", "==", false),
+        orderBy("timestamp")
+      ),
+      (snapshot) => {
+        const ordersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order));
+        setOrders(ordersData);
+      }
+    );
+
+    return () => {
+      unsubscribeOrders();
+    };
+  }, []);
+
+  const completeOrder = async (orderId: string, orderNumber: number) => {
+    await updateDoc(doc(db, "orders", orderId), {
+      completed: true,
+    });
+    notifications.show({
+      id: orderId,
+      message: (
+        <Group justify="space-between">
+          {`Order #${orderNumber} completed!`}
+          <Button
+            variant="outline"
+            onClick={async () => {
+              await updateDoc(doc(db, "orders", orderId), {
+                completed: false,
+              });
+              hideNotification(orderId);
+            }}
+          >
+            Undo
+          </Button>
+        </Group>
+      ),
+      autoClose: 8000,
+    });
+  };
+
+  return (
+    <Stack>
+      <SimpleGrid cols={{ sm: 2, lg: 3 }} spacing="sm" verticalSpacing="sm">
+        {orders.map((order) => (
+          <Fragment key={order.id}>
+            <OrderCard
+              order={order}
+              excludeCategories={["Specialty"]}
+              completeOrder={() =>
+                completeOrder(
+                  order.id!, // not null because fetched from db
+                  order.number
+                )
+              }
+              completeCategory="view"
+            />
           </Fragment>
         ))}
       </SimpleGrid>
@@ -168,7 +280,7 @@ function CashierPage({
       discount: 0,
     },
     onValuesChange: (values) => {
-      setTotal(getTotal(values.items) - values.discount);
+      setTotal(calculateTotal(values.items) - values.discount);
     },
     validate: {
       number: (value) => (value > 0 ? null : "Order number is required"),
@@ -202,7 +314,7 @@ function CashierPage({
     ])
   );
 
-  const getTotal = (categoires: Record<string, Record<string, number>>) => {
+  const calculateTotal = (categoires: Record<string, Record<string, number>>) => {
     return Object.entries(categoires).reduce(
       (sum, [categoryName, category]) =>
         sum +
@@ -216,7 +328,7 @@ function CashierPage({
 
   const makeOrder = (formValues: typeof form.values): Order => ({
     number: formValues.number,
-    price: getTotal(formValues.items),
+    price: total,
     discount: formValues.discount,
     notes: formValues.notes,
     completed: false,
@@ -234,7 +346,6 @@ function CashierPage({
               )
             ),
           };
-          console.log(Object.entries(category));
           return Object.keys(newCategory.items).length > 0 ? [...categories, [categoryName, newCategory]] : categories;
         },
         []
@@ -268,9 +379,7 @@ function CashierPage({
                       return (
                         <Table.Tr key={item.itemName} className={classes.flexRow}>
                           <Table.Td className={classes.flexGrow}>{item.itemName}</Table.Td>
-                          <Table.Td className={classes.cashPriceContainer}>
-                            <NumberFormatter {...dollarFormat} value={item.price} />
-                          </Table.Td>
+                          <Table.Td className={classes.cashPriceContainer}>{formatPrice(item.price)}</Table.Td>
                           <Table.Td className={classes.numberButtonContainer}>
                             <Button.Group>
                               <Transition
@@ -331,8 +440,11 @@ function CashierPage({
             <NumberInput
               label="Apply Discount"
               min={0}
-              {...dollarFormat}
               key={form.key("discount")}
+              decimalScale={2}
+              fixedDecimalScale={true}
+              thousandSeparator=","
+              prefix="$"
               {...form.getInputProps("discount")}
             />
             <TextInput
@@ -345,9 +457,7 @@ function CashierPage({
         </Card.Section>
         <Card.Section className={classes.cashSubmit}>
           <Group>
-            <Text>
-              Total price: <NumberFormatter {...dollarFormat} value={total} />
-            </Text>
+            <Text>Order Total: {formatPrice(total)}</Text>
             <Button type="submit">Submit</Button>
           </Group>
         </Card.Section>
@@ -356,18 +466,100 @@ function CashierPage({
   );
 }
 
+function SpecialtyPage() {
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
+
+  useEffect(() => {
+    const unsubscribeSpecialties = onSnapshot(
+      query(collection(db, "specialty"), where("done", "==", false), orderBy("timestamp")),
+      (snapshot) => {
+        setSpecialties(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Specialty)));
+      }
+    );
+
+    return () => unsubscribeSpecialties();
+  }, []);
+
+  const completeSpecialtyOrder = async (orderId: string, orderNumber: number) => {
+    await Promise.all([
+      updateDoc(doc(db, "specialty", orderId), {
+        done: true,
+      }),
+      updateDoc(doc(db, "orders", orderId), {
+        ["categories.Specialty.done"]: true,
+      }),
+    ]);
+    notifications.show({
+      id: orderId + "specialty",
+      message: (
+        <Group justify="space-between">
+          {`Specialty order #${orderNumber} completed!`}
+          <Button
+            variant="outline"
+            onClick={async () => {
+              await Promise.all([
+                updateDoc(doc(db, "specialty", orderId), {
+                  done: false,
+                }),
+                updateDoc(doc(db, "orders", orderId), {
+                  ["categories.Specialty.done"]: false,
+                }),
+              ]);
+              hideNotification(orderId + "specialty");
+            }}
+          >
+            Undo
+          </Button>
+        </Group>
+      ),
+      autoClose: 8000,
+    });
+  };
+
+  return (
+    <Stack>
+      <SimpleGrid cols={{ sm: 2, lg: 3 }} spacing="sm" verticalSpacing="sm">
+        {specialties.map((specialty) => (
+          <Fragment key={specialty.id}>
+            <OrderCard
+              order={{
+                id: specialty.id,
+                number: specialty.number,
+                completed: specialty.done,
+                notes: specialty.notes,
+                price: 0,
+                discount: 0,
+                categories: { Specialty: { done: false, items: specialty.items } },
+              }}
+              completeOrder={() => completeSpecialtyOrder(specialty.id, specialty.number)}
+            />
+          </Fragment>
+        ))}
+      </SimpleGrid>
+    </Stack>
+  );
+}
+
 function AllOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "orders"), (snapshot) => {
+    const unsubscribe = onSnapshot(query(collection(db, "orders"), orderBy("timestamp")), (snapshot) => {
       setOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order)));
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
+
+  const itemsToString = (items: Order["categories"][string]["items"] | undefined) => {
+    if (items === undefined) return "-";
+
+    return Object.entries(items)
+      .map(([itemName, { quantity }]) => `${itemName} x${quantity}`)
+      .join(", ");
+  };
 
   if (loading) return <div>Loading orders...</div>;
 
@@ -377,23 +569,29 @@ function AllOrdersPage() {
       <Table>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Order Number</Table.Th>
+            <Table.Th>#</Table.Th>
+            <Table.Th>Time</Table.Th>
             <Table.Th>Price</Table.Th>
-            <Table.Th>Discount</Table.Th>
+            <Table.Th>Discount Applied</Table.Th>
             <Table.Th>Completed</Table.Th>
             <Table.Th>Notes</Table.Th>
-            <Table.Th>Items</Table.Th>
+            <Table.Th>Food</Table.Th>
+            <Table.Th>Drinks</Table.Th>
+            <Table.Th>Specialty</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {orders.map((order) => (
             <Table.Tr key={order.id}>
               <Table.Td>{order.number}</Table.Td>
-              <Table.Td>{order.price}</Table.Td>
-              <Table.Td>{order.discount}</Table.Td>
+              <Table.Td>{order.timestamp?.toDate().toLocaleTimeString("en-US")}</Table.Td>
+              <Table.Td>{formatPrice(order.price)}</Table.Td>
+              <Table.Td>{formatPrice(order.discount)}</Table.Td>
               <Table.Td>{order.completed ? "Yes" : "No"}</Table.Td>
               <Table.Td>{order.notes}</Table.Td>
-              <Table.Td>{JSON.stringify(order.categories)}</Table.Td>
+              <Table.Td>{itemsToString(order.categories["Food"]?.items)}</Table.Td>
+              <Table.Td>{itemsToString(order.categories["Drinks"]?.items)}</Table.Td>
+              <Table.Td>{itemsToString(order.categories["Specialty"]?.items)}</Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>
@@ -404,7 +602,6 @@ function AllOrdersPage() {
 
 function App() {
   const [menu, setMenu] = useState<Menu["categories"]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -420,38 +617,28 @@ function App() {
       }
     );
 
-    const unsubscribeOrders = onSnapshot(
-      query(collection(db, "orders"), where("completed", "==", false), orderBy("timestamp")),
-      (snapshot) => {
-        const ordersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order));
-        setOrders(ordersData);
-      },
-      (error) => {
-        console.error("Error fetching orders:", error);
-      }
-    );
-
-    // Cleanup listeners on unmount
     return () => {
       unsubscribeMenu();
-      unsubscribeOrders();
     };
   }, []);
 
-  const ordersCollectionRef = collection(db, "orders");
   const submitOrder = async (order: Order) => {
-    await addDoc(ordersCollectionRef, { ...order, timestamp: serverTimestamp() });
-  };
-
-  const completeOrder = async (orderId: string) => {
-    await updateDoc(doc(db, "orders", orderId), {
-      completed: true,
-    });
-  };
-
-  const checkCategory = async (orderId: string, categoryName: string, value: boolean) => {
-    await updateDoc(doc(db, "orders", orderId), {
-      [`categories.${categoryName}.done`]: value,
+    const newOrder = {
+      ...order,
+      timestamp: serverTimestamp(),
+      specialtyOnly: Object.keys(order.categories).length === 1 && order.categories["Specialty"] !== undefined,
+    };
+    await addDoc(collection(db, "orders"), newOrder).then((docRef) => {
+      if (order.categories["Specialty"] !== undefined) {
+        const specialty = {
+          number: order.number,
+          notes: order.notes,
+          done: false,
+          timestamp: serverTimestamp(),
+          items: order.categories.Specialty.items,
+        };
+        setDoc(doc(db, "specialty", docRef.id), specialty);
+      }
     });
   };
 
@@ -463,17 +650,25 @@ function App() {
     <Tabs defaultValue="cashier" keepMounted={false}>
       <Tabs.List>
         <Tabs.Tab value="cashier">Cashier</Tabs.Tab>
-        <Tabs.Tab value="activeOrders">Active Orders</Tabs.Tab>
+        <Tabs.Tab value="activeOrders">Food/Drink</Tabs.Tab>
+        <Tabs.Tab value="verification">Verification</Tabs.Tab>
+        <Tabs.Tab value="specialty">Specialty</Tabs.Tab>
         <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="cashier">
         <CashierPage menu={menu} submitOrder={submitOrder} />
       </Tabs.Panel>
       <Tabs.Panel value="activeOrders">
-        <OrderPage orders={orders} completeOrder={completeOrder} checkCategory={checkCategory} />
+        <OrderPage />
+      </Tabs.Panel>
+      <Tabs.Panel value="verification">
+        <VerificationPage />
       </Tabs.Panel>
       <Tabs.Panel value="allOrders">
         <AllOrdersPage />
+      </Tabs.Panel>
+      <Tabs.Panel value="specialty">
+        <SpecialtyPage />
       </Tabs.Panel>
     </Tabs>
   );
