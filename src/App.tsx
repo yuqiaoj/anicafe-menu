@@ -96,7 +96,7 @@ function OrderCard({
       <Card.Section withBorder>
         <Group style={{ display: "flex", justifyContent: "space-between", alignItems: "center", height: "36px" }}>
           <Title order={3}>Order #{order.number}</Title>
-          {completeOrder && <Button onClick={completeOrder}>Complete Order</Button>}
+          {completeOrder && <Button onClick={completeOrder}>Complete</Button>}
         </Group>
         {order.notes && (
           <Text lineClamp={3} style={{ overflow: "auto", overflowWrap: "break-word", marginTop: "8px" }}>
@@ -188,7 +188,7 @@ function OrderPage() {
   );
 }
 
-function VerificationPage() {
+function ServerPage() {
   const [orders, setOrders] = useState<Order[]>([]);
 
   useEffect(() => {
@@ -269,7 +269,7 @@ function CashierPage({
   const form = useForm({
     mode: "uncontrolled",
     initialValues: {
-      number: 0,
+      number: null,
       notes: "",
       items: Object.fromEntries(
         menu.map((category) => [
@@ -283,7 +283,7 @@ function CashierPage({
       setTotal(calculateTotal(values.items) - values.discount);
     },
     validate: {
-      number: (value: number) => (value > 0 ? null : "Order number is required"),
+      number: (value: number | null) => (value && value > 0 ? null : "Order number is required"),
       discount: () => (total >= 0 ? null : "Discount greater than order total"),
     },
   });
@@ -294,7 +294,7 @@ function CashierPage({
       title: "Review Order",
       children: (
         <Stack>
-          <Text size="sm">Please confirm that the order number and details are correct:</Text>
+          <Text size="sm">Please confirm that the order details are correct:</Text>
           <OrderCard order={newOrder} />
         </Stack>
       ),
@@ -327,7 +327,7 @@ function CashierPage({
   };
 
   const makeOrder = (formValues: typeof form.values): Order => ({
-    number: formValues.number,
+    number: formValues.number ?? 0, // 0 case should not happen due to validation
     price: total,
     discount: formValues.discount,
     notes: formValues.notes,
@@ -651,7 +651,7 @@ function App() {
       <Tabs.List>
         <Tabs.Tab value="cashier">Cashier</Tabs.Tab>
         <Tabs.Tab value="activeOrders">Food/Drink</Tabs.Tab>
-        <Tabs.Tab value="verification">Verification</Tabs.Tab>
+        <Tabs.Tab value="server">Servers</Tabs.Tab>
         <Tabs.Tab value="specialty">Specialty</Tabs.Tab>
         <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
       </Tabs.List>
@@ -661,8 +661,8 @@ function App() {
       <Tabs.Panel value="activeOrders">
         <OrderPage />
       </Tabs.Panel>
-      <Tabs.Panel value="verification">
-        <VerificationPage />
+      <Tabs.Panel value="server">
+        <ServerPage />
       </Tabs.Panel>
       <Tabs.Panel value="allOrders">
         <AllOrdersPage />
