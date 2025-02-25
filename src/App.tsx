@@ -55,8 +55,9 @@ const db = getFirestore(firebaseapp);
 
 const formatPrice = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-interface Menu {
-  categories: { categoryName: string; items: { itemName: string; price: number }[] }[];
+interface MenuCategory {
+  categoryName: string;
+  items: { itemName: string; price: number }[];
 }
 
 interface Order {
@@ -115,7 +116,9 @@ function OrderCard({
                 ) : (
                   <Fragment key={categoryName}>
                     <Table.Tr style={{ tableLayout: "fixed" }}>
-                      <Table.Th>{categoryName}</Table.Th>
+                      <Table.Th>
+                        <Title order={5}>{categoryName}</Title>
+                      </Table.Th>
                       {completeCategory && order.id && (
                         <Table.Th style={{ display: "flex", justifyContent: "center", width: "40px" }}>
                           <Checkbox
@@ -259,13 +262,7 @@ function ServerPage() {
   );
 }
 
-function CashierPage({
-  menu,
-  submitOrder,
-}: {
-  menu: Menu["categories"];
-  submitOrder: (order: Order) => Promise<void>;
-}) {
+function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder: (order: Order) => Promise<void> }) {
   const form = useForm({
     mode: "uncontrolled",
     initialValues: {
@@ -359,6 +356,8 @@ function CashierPage({
     menu.map((category) => category.items.map(() => null))
   );
 
+  const PAGE_ROWS = 2;
+
   return (
     <Card shadow="sm" radius="md" p="md">
       <form onSubmit={form.onSubmit(handleSubmit)}>
@@ -366,64 +365,71 @@ function CashierPage({
           <Title order={2}>Create Order</Title>
         </Card.Section>
         <Card.Section withBorder>
-          <SimpleGrid cols={2}>
-            {menu.map((category, i) => (
-              <div key={category.categoryName}>
-                <Table>
-                  <Table.Tbody>
-                    <Table.Tr>
-                      <Table.Th>{category.categoryName}</Table.Th>
-                    </Table.Tr>
-                    {category.items.map((item, j) => {
-                      const formName = "items." + category.categoryName + "." + item.itemName;
-                      return (
-                        <Table.Tr key={item.itemName} className={classes.flexRow}>
-                          <Table.Td className={classes.flexGrow}>{item.itemName}</Table.Td>
-                          <Table.Td className={classes.cashPriceContainer}>{formatPrice(item.price)}</Table.Td>
-                          <Table.Td className={classes.numberButtonContainer}>
-                            <Button.Group>
-                              <Transition
-                                mounted={form.getValues().items[category.categoryName][item.itemName] !== 0}
-                                keepMounted
-                                transition="slide-left"
-                                duration={200}
-                                timingFunction="ease"
-                              >
-                                {(styles) => (
-                                  <>
-                                    <Button
-                                      variant="default"
-                                      onClick={() => handlersRef.current[i][j]?.decrement()}
-                                      style={styles}
+          <SimpleGrid cols={PAGE_ROWS}>
+            {Array.from(Array(PAGE_ROWS)).map((_, rowNum) => (
+              <Table key={rowNum}>
+                <Table.Tbody>
+                  {menu.map(
+                    (category, i) =>
+                      i % PAGE_ROWS === rowNum && (
+                        <Fragment key={category.categoryName}>
+                          <Table.Tr style={{ display: "flex", padding: `${i / PAGE_ROWS < 1 ? "0" : "12px"} 0 4px 0` }}>
+                            <Table.Td display="flex">
+                              <Title order={4}>{category.categoryName}</Title>
+                            </Table.Td>
+                          </Table.Tr>
+                          {category.items.map((item, j) => {
+                            const formName = "items." + category.categoryName + "." + item.itemName;
+                            return (
+                              <Table.Tr key={item.itemName} className={classes.flexRow}>
+                                <Table.Td className={classes.flexGrow}>{item.itemName}</Table.Td>
+                                <Table.Td className={classes.cashPriceContainer}>{formatPrice(item.price)}</Table.Td>
+                                <Table.Td className={classes.numberButtonContainer}>
+                                  <Button.Group>
+                                    <Transition
+                                      mounted={form.getValues().items[category.categoryName][item.itemName] !== 0}
+                                      keepMounted
+                                      transition="slide-left"
+                                      duration={200}
+                                      timingFunction="ease"
                                     >
-                                      -
+                                      {(styles) => (
+                                        <>
+                                          <Button
+                                            variant="default"
+                                            onClick={() => handlersRef.current[i][j]?.decrement()}
+                                            style={styles}
+                                          >
+                                            -
+                                          </Button>
+                                          <NumberInput
+                                            style={styles}
+                                            classNames={{
+                                              input: classes.numberButtonInput,
+                                            }}
+                                            hideControls
+                                            handlersRef={(el) => (handlersRef.current[i][j] = el)}
+                                            min={0}
+                                            max={99}
+                                            key={form.key(formName)}
+                                            {...form.getInputProps(formName)}
+                                          />
+                                        </>
+                                      )}
+                                    </Transition>
+                                    <Button variant="default" onClick={() => handlersRef.current[i][j]?.increment()}>
+                                      +
                                     </Button>
-                                    <NumberInput
-                                      style={styles}
-                                      classNames={{
-                                        input: classes.numberButtonInput,
-                                      }}
-                                      hideControls
-                                      handlersRef={(el) => (handlersRef.current[i][j] = el)}
-                                      min={0}
-                                      max={99}
-                                      key={form.key(formName)}
-                                      {...form.getInputProps(formName)}
-                                    />
-                                  </>
-                                )}
-                              </Transition>
-                              <Button variant="default" onClick={() => handlersRef.current[i][j]?.increment()}>
-                                +
-                              </Button>
-                            </Button.Group>
-                          </Table.Td>
-                        </Table.Tr>
-                      );
-                    })}
-                  </Table.Tbody>
-                </Table>
-              </div>
+                                  </Button.Group>
+                                </Table.Td>
+                              </Table.Tr>
+                            );
+                          })}
+                        </Fragment>
+                      )
+                  )}
+                </Table.Tbody>
+              </Table>
             ))}
           </SimpleGrid>
         </Card.Section>
@@ -601,25 +607,16 @@ function AllOrdersPage() {
 }
 
 function App() {
-  const [menu, setMenu] = useState<Menu["categories"]>([]);
+  const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribeMenu = onSnapshot(
-      doc(db, "menu", "menu"),
-      (docSnapshot) => {
-        setMenu(docSnapshot.data()?.categories);
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Error fetching menu:", error);
-        setLoading(false);
-      }
-    );
+    const unsubscribeMenu = onSnapshot(query(collection(db, "menu"), orderBy("categoryName")), (snapshot) => {
+      setMenu(snapshot.docs.map((doc) => doc.data() as MenuCategory));
+      setLoading(false);
+    });
 
-    return () => {
-      unsubscribeMenu();
-    };
+    return () => unsubscribeMenu();
   }, []);
 
   const submitOrder = async (order: Order) => {
