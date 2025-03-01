@@ -15,12 +15,14 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import {
+  Badge,
   Button,
   Card,
   Checkbox,
   Group,
   NumberInput,
   NumberInputHandlers,
+  Select,
   SimpleGrid,
   Stack,
   Table,
@@ -57,13 +59,14 @@ const formatPrice = (value: number) => value.toLocaleString("en-US", { style: "c
 
 interface MenuCategory {
   categoryName: string;
-  items: { itemName: string; price: number }[];
+  items: { itemName: string; price: number; stock: "high" | "low" | "none"; flags?: string[] }[];
 }
 
 interface Order {
   id?: string;
   timestamp?: Timestamp;
   specialtyOnly?: boolean;
+  zone?: string;
   number: number;
   price: number;
   discount: number;
@@ -81,6 +84,23 @@ interface Specialty {
   items: { [itemName: string]: { quantity: number } };
 }
 
+const zoneToColor = (zone: string) => {
+  switch (zone) {
+    case "Bar":
+      return "indigo";
+    case "Cashier":
+      return "purple";
+    case "Stage":
+      return "orange";
+    case "Undecided":
+      return "gray";
+    case "Volunteer":
+      return "teal";
+    default:
+      return "gray";
+  }
+}
+
 function OrderCard({
   order,
   excludeCategories,
@@ -96,7 +116,14 @@ function OrderCard({
     <Card shadow="sm" radius="md" p="md" style={{ height: "420px", display: "flex", flexDirection: "column" }}>
       <Card.Section withBorder>
         <Group style={{ display: "flex", justifyContent: "space-between", alignItems: "center", height: "36px" }}>
-          <Title order={3}>Order #{order.number}</Title>
+          <Group>
+            <Title order={3}>Order #{order.number}</Title>
+            {order.zone && (
+              <Badge color={zoneToColor(order.zone)}>
+                {order.zone}
+              </Badge>
+            )}
+          </Group>
           {completeOrder && <Button onClick={completeOrder}>Complete</Button>}
         </Group>
         {order.notes && (
@@ -268,13 +295,14 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
     initialValues: {
       number: null,
       notes: "",
+      discount: 0,
+      zone: "Undecided",
       items: Object.fromEntries(
         menu.map((category) => [
           category.categoryName,
           Object.fromEntries(category.items.map((item) => [item.itemName, 0])),
         ])
       ),
-      discount: 0,
     },
     onValuesChange: (values) => {
       setTotal(calculateTotal(values.items) - values.discount);
@@ -329,6 +357,7 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
     discount: formValues.discount,
     notes: formValues.notes,
     completed: false,
+    zone: formValues.zone,
     categories: Object.fromEntries(
       // Map formValues to Order.categories :skull:
       Object.entries(formValues.items).reduce(
@@ -453,6 +482,12 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
               prefix="$"
               {...form.getInputProps("discount")}
             />
+            <Select
+              label="Seating Zone"
+              allowDeselect={false}
+              data={["Bar", "Cashier", "Stage", "Undecided", "Volunteer"]}
+              {...form.getInputProps("zone")}
+            />
             <TextInput
               label="Notes"
               key={form.key("notes")}
@@ -546,13 +581,30 @@ function SpecialtyPage() {
   );
 }
 
-function AllOrdersPage() {
+function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const unsubscribe = onSnapshot(query(collection(db, "orders"), orderBy("timestamp")), (snapshot) => {
-      setOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order)));
+      let map: Record<string, number> = {
+        "Total Orders": 0,
+        ...Object.fromEntries(menu.flatMap((category) => category.items.map((item) => [item.itemName, 0]))),
+      };
+      setOrders(
+        snapshot.docs.map((doc) => {
+          const data = doc.data() as Order;
+          map["Total Orders"]++;
+          Object.values(data.categories).forEach((category) => {
+            Object.entries(category.items).forEach(([itemName, { quantity }]) => {
+              map = { ...map, [itemName]: (map[itemName] ?? 0) + quantity };
+            });
+          });
+          return { id: doc.id, ...data } as Order;
+        })
+      );
+      setAnalytics(map);
       setLoading(false);
     });
 
@@ -563,7 +615,8 @@ function AllOrdersPage() {
     if (items === undefined) return "-";
 
     return Object.entries(items)
-      .map(([itemName, { quantity }]) => `${itemName} x${quantity}`)
+      .sort()
+      .map(([itemName, { quantity }]) => `${quantity} ${itemName}`)
       .join(", ");
   };
 
@@ -571,6 +624,23 @@ function AllOrdersPage() {
 
   return (
     <Stack>
+      <Title order={2}>Analytics</Title>
+      <Table>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>Item</Table.Th>
+            <Table.Th>Quantity Sold</Table.Th>
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {Object.entries(analytics).map(([itemName, quantity]) => (
+            <Table.Tr key={itemName}>
+              <Table.Td>{itemName}</Table.Td>
+              <Table.Td>{quantity}</Table.Td>
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
       <Title order={2}>All Orders</Title>
       <Table>
         <Table.Thead>
@@ -662,7 +732,7 @@ function App() {
         <ServerPage />
       </Tabs.Panel>
       <Tabs.Panel value="allOrders">
-        <AllOrdersPage />
+        <AllOrdersPage menu={menu} />
       </Tabs.Panel>
       <Tabs.Panel value="specialty">
         <SpecialtyPage />
