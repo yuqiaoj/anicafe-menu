@@ -590,15 +590,18 @@ function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
     const unsubscribe = onSnapshot(query(collection(db, "orders"), orderBy("timestamp")), (snapshot) => {
       let map: Record<string, number> = {
         "Total Orders": 0,
+        "Total Items": 0,
+        "Total Revenue": 0,
         ...Object.fromEntries(menu.flatMap((category) => category.items.map((item) => [item.itemName, 0]))),
       };
       setOrders(
         snapshot.docs.map((doc) => {
           const data = doc.data() as Order;
           map["Total Orders"]++;
+          map["Total Revenue"] += data.price;
           Object.values(data.categories).forEach((category) => {
             Object.entries(category.items).forEach(([itemName, { quantity }]) => {
-              map = { ...map, [itemName]: (map[itemName] ?? 0) + quantity };
+              map = { ...map, ["Total Items"]: map["Total Items"]+ quantity, [itemName]: (map[itemName] ?? 0) + quantity };
             });
           });
           return { id: doc.id, ...data } as Order;
