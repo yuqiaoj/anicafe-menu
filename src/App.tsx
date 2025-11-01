@@ -740,7 +740,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
 
     modals.open({
       title: "Menu Saved",
-      children: <p>Your menu has been successfully updated!</p>,
+      children: <p>Menu successfully updated!</p>,
     });
   } catch (error) {
     console.error("Error saving menu:", error);
