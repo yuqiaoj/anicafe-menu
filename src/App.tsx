@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   orderBy,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import {
   Badge,
@@ -20,6 +21,7 @@ import {
   Card,
   Checkbox,
   Group,
+  List,
   NumberInput,
   NumberInputHandlers,
   Select,
@@ -57,9 +59,25 @@ const db = getFirestore(firebaseapp);
 
 const formatPrice = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+interface MenuItem {
+  itemName: string;
+  price: number;
+  stock: "high" | "low" | "none";
+  flags?: string[];
+}
+
+interface EditableMenuItem extends MenuItem {
+  flagsString: string; // temporary string representation for editing
+}
+
 interface MenuCategory {
   categoryName: string;
-  items: { itemName: string; price: number; stock: "high" | "low" | "none"; flags?: string[] }[];
+  items: MenuItem[];
+}
+
+interface EditableMenuCategory {
+  categoryName: string;
+  items: EditableMenuItem[];
 }
 
 interface Order {
@@ -581,6 +599,294 @@ function SpecialtyPage() {
   );
 }
 
+export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
+  const [editedMenu, setEditedMenu] = useState<EditableMenuCategory[]>(
+    menu.map((cat) => ({
+      categoryName: cat.categoryName,
+      items: cat.items.map((it) => ({
+        ...it,
+        flagsString: (it.flags || []).join(", "),
+      })),
+    }))
+  );
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  useEffect(() => {
+    setEditedMenu(
+      menu.map((cat) => ({
+        categoryName: cat.categoryName,
+        items: cat.items.map((it) => ({
+          ...it,
+          flagsString: (it.flags || []).join(", "),
+        })),
+      }))
+    );
+    setHasUnsavedChanges(false);
+  }, [menu]);
+
+  // Detect unsaved changes
+  useEffect(() => {
+    const normalize = (m: EditableMenuCategory[]) =>
+      JSON.stringify(
+        m.map((cat) => ({
+          categoryName: cat.categoryName,
+          items: cat.items.map((it) => ({
+            itemName: it.itemName,
+            price: it.price,
+            stock: it.stock,
+            flagsString: it.flagsString,
+          })),
+        }))
+      );
+    setHasUnsavedChanges(normalize(editedMenu) !== normalize(
+      menu.map((cat) => ({
+        categoryName: cat.categoryName,
+        items: cat.items.map((it) => ({
+          itemName: it.itemName,
+          price: it.price,
+          stock: it.stock,
+          flagsString: (it.flags || []).join(", "),
+        })),
+      }))
+    ));
+  }, [editedMenu, menu]);
+
+  const handleItemChange = (
+    catIndex: number,
+    itemIndex: number,
+    field: keyof EditableMenuItem,
+    value: string | number
+  ) => {
+    setEditedMenu((prev) =>
+      prev.map((cat, i) =>
+        i === catIndex
+          ? {
+              ...cat,
+              items: cat.items.map((item, j) =>
+                j === itemIndex ? { ...item, [field]: value } : item
+              ),
+            }
+          : cat
+      )
+    );
+  };
+
+  const handleAddItem = (catIndex: number) => {
+    setEditedMenu((prev) =>
+      prev.map((cat, i) =>
+        i === catIndex
+          ? {
+              ...cat,
+              items: [
+                ...cat.items,
+                { itemName: "New Item", price: 0, stock: "high", flags: [], flagsString: "" },
+              ],
+            }
+          : cat
+      )
+    );
+  };
+
+  const handleRemoveItem = (catIndex: number, itemIndex: number) => {
+    setEditedMenu((prev) =>
+      prev.map((cat, i) =>
+        i === catIndex
+          ? { ...cat, items: cat.items.filter((_, j) => j !== itemIndex) }
+          : cat
+      )
+    );
+  };
+
+  const handleSaveMenu = async () => {
+  try {
+    const batch = writeBatch(db);
+
+    // convert flagsString -> flags array on save
+    editedMenu.forEach((category) => {
+      const itemsForSave: MenuItem[] = category.items.map((it) => {
+        const flags = it.flagsString
+          ? it.flagsString.split(",").map((s) => s.trim()).filter(Boolean)
+          : [];
+        return {
+          itemName: it.itemName,
+          price: it.price,
+          stock: it.stock,
+          flags,
+        };
+      });
+
+      const categoryRef = doc(db, "menu", category.categoryName);
+      batch.set(categoryRef, {
+        categoryName: category.categoryName,
+        items: itemsForSave,
+      });
+    });
+
+    await batch.commit();
+    setHasUnsavedChanges(false);
+
+    // Re-sync editedMenu: update both flags and flagsString
+    setEditedMenu((prev) =>
+      prev.map((cat) => ({
+        ...cat,
+        items: cat.items.map((it) => {
+          const flags = it.flagsString
+            ? it.flagsString.split(",").map((s) => s.trim()).filter(Boolean)
+            : [];
+          return { ...it, flags, flagsString: flags.join(", ") };
+        }),
+      }))
+    );
+
+    modals.open({
+      title: "Menu Saved",
+      children: <p>Your menu has been successfully updated!</p>,
+    });
+  } catch (error) {
+    console.error("Error saving menu:", error);
+    modals.open({
+      title: "Error",
+      children: <p>Failed to save menu. Check console for details.</p>,
+    });
+  }
+};
+
+  return (
+    <Stack>
+      <Card shadow="sm" radius="md" p="md">
+        <Group justify="space-between">
+          <Title order={2}>Edit Menu</Title>
+          <Button onClick={handleSaveMenu} color={hasUnsavedChanges ? "yellow" : "blue"}>
+            {hasUnsavedChanges ? "Save Changes *" : "Save Changes"}
+          </Button>
+        </Group>
+      </Card>
+
+      <Card shadow="sm" radius="md" p="md" withBorder>
+        <Title order={4} mb="xs">
+          Flag Legend
+        </Title>
+        <List spacing="xs" size="sm" withPadding>
+          <List.Item>
+            <Text span fw={700}>
+              NF
+            </Text>{" "}
+            – Nut Free
+          </List.Item>
+          <List.Item>
+            <Text span fw={700}>
+              DF
+            </Text>{" "}
+            – Dairy Free
+          </List.Item>
+          <List.Item>
+            <Text span fw={700}>
+              GF
+            </Text>{" "}
+            – Gluten Free
+          </List.Item>
+          <List.Item>
+            <Text span fw={700}>
+              VG
+            </Text>{" "}
+            – Vegan
+          </List.Item>
+          <List.Item>
+            <Text span fw={700}>
+              *
+            </Text>{" "}
+            – Contains Pork (e.g. gelatin)
+          </List.Item>
+        </List>
+      </Card>
+
+      {editedMenu.map((category, catIndex) => (
+        <Card key={category.categoryName} shadow="sm" radius="md" p="md">
+          <Group justify="space-between" mb="sm">
+            <Title order={4}>{category.categoryName}</Title>
+            <Button size="xs" onClick={() => handleAddItem(catIndex)}>
+              + Add Item
+            </Button>
+          </Group>
+          <Table>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Name</Table.Th>
+                <Table.Th>Price</Table.Th>
+                <Table.Th>Stock</Table.Th>
+                <Table.Th>Flags (e.g. NF, GF, VG)</Table.Th>
+                <Table.Th>Remove</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {category.items.map((item: EditableMenuItem, itemIndex: number) => (
+                <Table.Tr key={itemIndex}>
+                  <Table.Td>
+                    <TextInput
+                      value={item.itemName}
+                      onChange={(e) =>
+                        handleItemChange(catIndex, itemIndex, "itemName", e.currentTarget.value)
+                      }
+                    />
+                  </Table.Td>
+                  <Table.Td>
+                    <NumberInput
+                      value={item.price}
+                      min={0}
+                      decimalScale={2}
+                      fixedDecimalScale
+                      onChange={(val) =>
+                        handleItemChange(catIndex, itemIndex, "price", val ?? 0)
+                      }
+                    />
+                  </Table.Td>
+                  <Table.Td>
+                    <Select
+                      value={item.stock}
+                      data={[
+                        { value: "high", label: "High" },
+                        { value: "low", label: "Low" },
+                        { value: "none", label: "None" },
+                      ]}
+                      onChange={(val) =>
+                        handleItemChange(
+                          catIndex,
+                          itemIndex,
+                          "stock",
+                          (val ?? "none") as "high" | "low" | "none"
+                        )
+                      }
+                    />
+                  </Table.Td>
+                  <Table.Td>
+                    {/* Keep flags as an editable string while editing to allow commas */}
+                    <TextInput
+                      value={item.flagsString ?? (item.flags || []).join(", ")}
+                      onChange={(e) =>
+                        handleItemChange(catIndex, itemIndex, "flagsString", e.currentTarget.value)
+                      }
+                    />
+                  </Table.Td>
+                  <Table.Td>
+                    <Button
+                      color="red"
+                      size="xs"
+                      onClick={() => handleRemoveItem(catIndex, itemIndex)}
+                    >
+                      Remove
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Card>
+      ))}
+    </Stack>
+  );
+}
+
+
 function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -612,7 +918,7 @@ function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [menu]);
 
   const itemsToString = (items: Order["categories"][string]["items"] | undefined) => {
     if (items === undefined) return "-";
@@ -723,6 +1029,7 @@ function App() {
         <Tabs.Tab value="activeOrders">Food/Drink</Tabs.Tab>
         <Tabs.Tab value="server">Servers</Tabs.Tab>
         <Tabs.Tab value="specialty">Specialty</Tabs.Tab>
+        <Tabs.Tab value="editMenu">Edit Menu</Tabs.Tab>
         <Tabs.Tab value="allOrders">All Orders</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="cashier">
@@ -736,6 +1043,9 @@ function App() {
       </Tabs.Panel>
       <Tabs.Panel value="allOrders">
         <AllOrdersPage menu={menu} />
+      </Tabs.Panel>
+      <Tabs.Panel value="editMenu">
+        <EditMenuPage menu={menu} />
       </Tabs.Panel>
       <Tabs.Panel value="specialty">
         <SpecialtyPage />
