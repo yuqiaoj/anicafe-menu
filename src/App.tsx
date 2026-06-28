@@ -22,7 +22,6 @@ import {
   Checkbox,
   Group,
   List,
-  Modal,
   NumberInput,
   NumberInputHandlers,
   Select,
@@ -103,14 +102,6 @@ interface Specialty {
   items: { [itemName: string]: { quantity: number } };
 }
 
-type CashierFormValues = {
-  number: number | null;
-  notes: string;
-  discount: number;
-  zone: string;
-  items: Record<string, Record<string, number>>;
-};
-
 const zoneToColor = (zone: string) => {
   switch (zone) {
     case "Bar":
@@ -126,7 +117,7 @@ const zoneToColor = (zone: string) => {
     default:
       return "gray";
   }
-};
+}
 
 function OrderCard({
   order,
@@ -145,7 +136,11 @@ function OrderCard({
         <Group style={{ display: "flex", justifyContent: "space-between", alignItems: "center", height: "36px" }}>
           <Group>
             <Title order={3}>Order #{order.number}</Title>
-            {order.zone && <Badge color={zoneToColor(order.zone)}>{order.zone}</Badge>}
+            {order.zone && (
+              <Badge color={zoneToColor(order.zone)}>
+                {order.zone}
+              </Badge>
+            )}
           </Group>
           {completeOrder && <Button onClick={completeOrder}>Complete</Button>}
         </Group>
@@ -191,7 +186,7 @@ function OrderCard({
                         </Table.Tr>
                       ))}
                   </Fragment>
-                ),
+                )
               )}
           </Table.Tbody>
         </Table>
@@ -209,12 +204,12 @@ function OrderPage() {
         collection(db, "orders"),
         where("completed", "==", false),
         where("specialtyOnly", "==", false),
-        orderBy("timestamp"),
+        orderBy("timestamp")
       ),
       (snapshot) => {
-        const ordersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Order);
+        const ordersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order));
         setOrders(ordersData);
-      },
+      }
     );
 
     return () => {
@@ -250,12 +245,12 @@ function ServerPage() {
         collection(db, "orders"),
         where("completed", "==", false),
         where("specialtyOnly", "==", false),
-        orderBy("timestamp"),
+        orderBy("timestamp")
       ),
       (snapshot) => {
-        const ordersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Order);
+        const ordersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Order));
         setOrders(ordersData);
-      },
+      }
     );
 
     return () => {
@@ -300,7 +295,7 @@ function ServerPage() {
               completeOrder={() =>
                 completeOrder(
                   order.id!, // not null because fetched from db
-                  order.number,
+                  order.number
                 )
               }
               completeCategory="view"
@@ -313,7 +308,7 @@ function ServerPage() {
 }
 
 function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder: (order: Order) => Promise<void> }) {
-  const form = useForm<CashierFormValues>({
+  const form = useForm({
     mode: "uncontrolled",
     initialValues: {
       number: null,
@@ -324,36 +319,42 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
         menu.map((category) => [
           category.categoryName,
           Object.fromEntries(category.items.map((item) => [item.itemName, 0])),
-        ]),
+        ])
       ),
     },
     onValuesChange: (values) => {
       setTotal(calculateTotal(values.items) - values.discount);
     },
     validate: {
+      number: (value: number | null) => (value && value > 0 ? null : "Order number is required"),
       discount: () => (total >= 0 ? null : "Discount greater than order total"),
     },
   });
 
-  const [reviewModalOpen, setReviewModalOpen] = useState(false);
-  const [reviewOrderNumber, setReviewOrderNumber] = useState<number | null>(null);
-  const [reviewNotes, setReviewNotes] = useState("");
-  const [reviewZone, setReviewZone] = useState<string>("Undecided");
-  const [reviewDiscount, setReviewDiscount] = useState<number>(0);
-
   const handleSubmit = (values: typeof form.values) => {
-    setReviewOrderNumber(values.number ?? null);
-    setReviewNotes(values.notes);
-    setReviewZone(values.zone ?? "Undecided");
-    setReviewDiscount(values.discount ?? 0);
-    setReviewModalOpen(true);
+    const newOrder = makeOrder(values);
+    modals.openConfirmModal({
+      title: "Review Order",
+      children: (
+        <Stack>
+          <Text size="sm">Please confirm that the order details are correct:</Text>
+          <OrderCard order={newOrder} />
+        </Stack>
+      ),
+      labels: { confirm: "Confirm", cancel: "Cancel" },
+      onCancel: () => {},
+      onConfirm: () => {
+        submitOrder(newOrder);
+        form.reset();
+      },
+    });
   };
 
   const itemPriceMap = Object.fromEntries(
     menu.map((category) => [
       category.categoryName,
       Object.fromEntries(category.items.map((item) => [item.itemName, item.price])),
-    ]),
+    ])
   );
 
   const calculateTotal = (categoires: Record<string, Record<string, number>>) => {
@@ -362,14 +363,14 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
         sum +
         Object.entries(category).reduce(
           (sum, [itemName, quantity]) => sum + itemPriceMap[categoryName][itemName] * quantity,
-          0,
+          0
         ),
-      0,
+      0
     );
   };
 
   const makeOrder = (formValues: typeof form.values): Order => ({
-    number: formValues.number ?? 0,
+    number: formValues.number ?? 0, // 0 case should not happen due to validation
     price: total,
     discount: formValues.discount,
     notes: formValues.notes,
@@ -385,21 +386,21 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
               Object.entries(category).reduce(
                 (items: [string, Order["categories"][string]["items"][string]][], [itemName, quantity]) =>
                   quantity > 0 ? [...items, [itemName, { quantity }]] : items,
-                [],
-              ),
+                []
+              )
             ),
           };
           return Object.keys(newCategory.items).length > 0 ? [...categories, [categoryName, newCategory]] : categories;
         },
-        [],
-      ),
+        []
+      )
     ),
   });
 
   const [total, setTotal] = useState(0);
 
   const handlersRef = useRef<(NumberInputHandlers | null | undefined)[][]>(
-    menu.map((category) => category.items.map(() => null)),
+    menu.map((category) => category.items.map(() => null))
   );
 
   const PAGE_ROWS = 2;
@@ -472,7 +473,7 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
                             );
                           })}
                         </Fragment>
-                      ),
+                      )
                   )}
                 </Table.Tbody>
               </Table>
@@ -482,6 +483,7 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
         <Card.Section withBorder>
           <Group className={classes.cashOptions}>
             <NumberInput
+              withAsterisk
               label="Order Number"
               hideControls
               min={0}
@@ -519,88 +521,6 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
           </Group>
         </Card.Section>
       </form>
-      <Modal opened={reviewModalOpen} onClose={() => setReviewModalOpen(false)} title="Review Order" centered size="xl">
-        <Stack>
-          <Text size="sm">Edit order details before confirming:</Text>
-          <Group grow>
-            <NumberInput
-              label="Order Number"
-              min={0}
-              value={reviewOrderNumber ?? undefined}
-              onChange={(value: string | number) => setReviewOrderNumber(typeof value === "number" ? value : null)}
-            />
-            <NumberInput
-              label="Apply Discount"
-              min={0}
-              decimalScale={2}
-              fixedDecimalScale={true}
-              thousandSeparator=","
-              prefix="$"
-              value={reviewDiscount}
-              onChange={(val: string | number) => setReviewDiscount(typeof val === "string" ? parseFloat(val) : val)}
-            />
-            <Select
-              label="Seating Zone"
-              data={["Bar", "Cashier", "Stage", "Undecided", "Volunteer"]}
-              value={reviewZone}
-              onChange={(val) => setReviewZone(val ?? "Undecided")}
-            />
-            <TextInput
-              label="Notes"
-              value={reviewNotes}
-              onChange={(event) => setReviewNotes(event.currentTarget.value)}
-            />
-          </Group>
-
-          <Text>
-            <strong>Total Cost:</strong> {formatPrice(total)}
-          </Text>
-
-          <OrderCard
-            order={makeOrder({
-              ...form.values,
-              number: reviewOrderNumber ?? form.values.number,
-              notes: reviewNotes,
-              zone: reviewZone,
-              discount: reviewDiscount ?? form.values.discount,
-            } as CashierFormValues)}
-          />
-
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
-            <Button
-              variant="outline"
-              onClick={() => {
-                form.setFieldValue("number", reviewOrderNumber);
-                form.setFieldValue("notes", reviewNotes);
-                form.setFieldValue("zone", reviewZone);
-                form.setFieldValue("discount", reviewDiscount);
-                setReviewModalOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
-
-            <Button
-              onClick={async () => {
-                await submitOrder(
-                  makeOrder({
-                    ...form.values,
-                    number: reviewOrderNumber!,
-                    notes: reviewNotes,
-                    zone: reviewZone,
-                    discount: reviewDiscount,
-                  } as CashierFormValues),
-                );
-                form.reset();
-                setReviewModalOpen(false);
-              }}
-              disabled={reviewOrderNumber === null || reviewOrderNumber <= 0}
-            >
-              Confirm
-            </Button>
-          </div>
-        </Stack>
-      </Modal>
     </Card>
   );
 }
@@ -612,8 +532,8 @@ function SpecialtyPage() {
     const unsubscribeSpecialties = onSnapshot(
       query(collection(db, "specialty"), where("done", "==", false), orderBy("timestamp")),
       (snapshot) => {
-        setSpecialties(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Specialty));
-      },
+        setSpecialties(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Specialty)));
+      }
     );
 
     return () => unsubscribeSpecialties();
@@ -687,7 +607,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
         ...it,
         flagsString: (it.flags || []).join(", "),
       })),
-    })),
+    }))
   );
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
@@ -699,7 +619,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
           ...it,
           flagsString: (it.flags || []).join(", "),
         })),
-      })),
+      }))
     );
     setHasUnsavedChanges(false);
   }, [menu]);
@@ -716,39 +636,38 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
             stock: it.stock,
             flagsString: it.flagsString,
           })),
-        })),
+        }))
       );
-    setHasUnsavedChanges(
-      normalize(editedMenu) !==
-        normalize(
-          menu.map((cat) => ({
-            categoryName: cat.categoryName,
-            items: cat.items.map((it) => ({
-              itemName: it.itemName,
-              price: it.price,
-              stock: it.stock,
-              flagsString: (it.flags || []).join(", "),
-            })),
-          })),
-        ),
-    );
+    setHasUnsavedChanges(normalize(editedMenu) !== normalize(
+      menu.map((cat) => ({
+        categoryName: cat.categoryName,
+        items: cat.items.map((it) => ({
+          itemName: it.itemName,
+          price: it.price,
+          stock: it.stock,
+          flagsString: (it.flags || []).join(", "),
+        })),
+      }))
+    ));
   }, [editedMenu, menu]);
 
   const handleItemChange = (
     catIndex: number,
     itemIndex: number,
     field: keyof EditableMenuItem,
-    value: string | number,
+    value: string | number
   ) => {
     setEditedMenu((prev) =>
       prev.map((cat, i) =>
         i === catIndex
           ? {
               ...cat,
-              items: cat.items.map((item, j) => (j === itemIndex ? { ...item, [field]: value } : item)),
+              items: cat.items.map((item, j) =>
+                j === itemIndex ? { ...item, [field]: value } : item
+              ),
             }
-          : cat,
-      ),
+          : cat
+      )
     );
   };
 
@@ -758,78 +677,79 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
         i === catIndex
           ? {
               ...cat,
-              items: [...cat.items, { itemName: "New Item", price: 0, stock: "high", flags: [], flagsString: "" }],
+              items: [
+                ...cat.items,
+                { itemName: "New Item", price: 0, stock: "high", flags: [], flagsString: "" },
+              ],
             }
-          : cat,
-      ),
+          : cat
+      )
     );
   };
 
   const handleRemoveItem = (catIndex: number, itemIndex: number) => {
     setEditedMenu((prev) =>
-      prev.map((cat, i) => (i === catIndex ? { ...cat, items: cat.items.filter((_, j) => j !== itemIndex) } : cat)),
+      prev.map((cat, i) =>
+        i === catIndex
+          ? { ...cat, items: cat.items.filter((_, j) => j !== itemIndex) }
+          : cat
+      )
     );
   };
 
   const handleSaveMenu = async () => {
-    try {
-      const batch = writeBatch(db);
+  try {
+    const batch = writeBatch(db);
 
-      // convert flagsString -> flags array on save
-      editedMenu.forEach((category) => {
-        const itemsForSave: MenuItem[] = category.items.map((it) => {
+    // convert flagsString -> flags array on save
+    editedMenu.forEach((category) => {
+      const itemsForSave: MenuItem[] = category.items.map((it) => {
+        const flags = it.flagsString
+          ? it.flagsString.split(",").map((s) => s.trim()).filter(Boolean)
+          : [];
+        return {
+          itemName: it.itemName,
+          price: it.price,
+          stock: it.stock,
+          flags,
+        };
+      });
+
+      const categoryRef = doc(db, "menu", category.categoryName);
+      batch.set(categoryRef, {
+        categoryName: category.categoryName,
+        items: itemsForSave,
+      });
+    });
+
+    await batch.commit();
+    setHasUnsavedChanges(false);
+
+    // Re-sync editedMenu: update both flags and flagsString
+    setEditedMenu((prev) =>
+      prev.map((cat) => ({
+        ...cat,
+        items: cat.items.map((it) => {
           const flags = it.flagsString
-            ? it.flagsString
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean)
+            ? it.flagsString.split(",").map((s) => s.trim()).filter(Boolean)
             : [];
-          return {
-            itemName: it.itemName,
-            price: it.price,
-            stock: it.stock,
-            flags,
-          };
-        });
+          return { ...it, flags, flagsString: flags.join(", ") };
+        }),
+      }))
+    );
 
-        const categoryRef = doc(db, "menu", category.categoryName);
-        batch.set(categoryRef, {
-          categoryName: category.categoryName,
-          items: itemsForSave,
-        });
-      });
-
-      await batch.commit();
-      setHasUnsavedChanges(false);
-
-      // Re-sync editedMenu: update both flags and flagsString
-      setEditedMenu((prev) =>
-        prev.map((cat) => ({
-          ...cat,
-          items: cat.items.map((it) => {
-            const flags = it.flagsString
-              ? it.flagsString
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-              : [];
-            return { ...it, flags, flagsString: flags.join(", ") };
-          }),
-        })),
-      );
-
-      modals.open({
-        title: "Menu Saved",
-        children: <p>Menu successfully updated!</p>,
-      });
-    } catch (error) {
-      console.error("Error saving menu:", error);
-      modals.open({
-        title: "Error",
-        children: <p>Failed to save menu. Check console for details.</p>,
-      });
-    }
-  };
+    modals.open({
+      title: "Menu Saved",
+      children: <p>Menu successfully updated!</p>,
+    });
+  } catch (error) {
+    console.error("Error saving menu:", error);
+    modals.open({
+      title: "Error",
+      children: <p>Failed to save menu. Check console for details.</p>,
+    });
+  }
+};
 
   return (
     <Stack>
@@ -904,7 +824,9 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
                   <Table.Td>
                     <TextInput
                       value={item.itemName}
-                      onChange={(e) => handleItemChange(catIndex, itemIndex, "itemName", e.currentTarget.value)}
+                      onChange={(e) =>
+                        handleItemChange(catIndex, itemIndex, "itemName", e.currentTarget.value)
+                      }
                     />
                   </Table.Td>
                   <Table.Td>
@@ -913,7 +835,9 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
                       min={0}
                       decimalScale={2}
                       fixedDecimalScale
-                      onChange={(val) => handleItemChange(catIndex, itemIndex, "price", val ?? 0)}
+                      onChange={(val) =>
+                        handleItemChange(catIndex, itemIndex, "price", val ?? 0)
+                      }
                     />
                   </Table.Td>
                   <Table.Td>
@@ -925,7 +849,12 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
                         { value: "none", label: "None" },
                       ]}
                       onChange={(val) =>
-                        handleItemChange(catIndex, itemIndex, "stock", (val ?? "none") as "high" | "low" | "none")
+                        handleItemChange(
+                          catIndex,
+                          itemIndex,
+                          "stock",
+                          (val ?? "none") as "high" | "low" | "none"
+                        )
                       }
                     />
                   </Table.Td>
@@ -933,11 +862,17 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
                     {/* Keep flags as an editable string while editing to allow commas */}
                     <TextInput
                       value={item.flagsString ?? (item.flags || []).join(", ")}
-                      onChange={(e) => handleItemChange(catIndex, itemIndex, "flagsString", e.currentTarget.value)}
+                      onChange={(e) =>
+                        handleItemChange(catIndex, itemIndex, "flagsString", e.currentTarget.value)
+                      }
                     />
                   </Table.Td>
                   <Table.Td>
-                    <Button color="red" size="xs" onClick={() => handleRemoveItem(catIndex, itemIndex)}>
+                    <Button
+                      color="red"
+                      size="xs"
+                      onClick={() => handleRemoveItem(catIndex, itemIndex)}
+                    >
                       Remove
                     </Button>
                   </Table.Td>
@@ -950,6 +885,7 @@ export function EditMenuPage({ menu }: { menu: MenuCategory[] }) {
     </Stack>
   );
 }
+
 
 function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -971,15 +907,11 @@ function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
           map["Total Revenue"] += data.price;
           Object.values(data.categories).forEach((category) => {
             Object.entries(category.items).forEach(([itemName, { quantity }]) => {
-              map = {
-                ...map,
-                ["Total Items"]: map["Total Items"] + quantity,
-                [itemName]: (map[itemName] ?? 0) + quantity,
-              };
+              map = { ...map, ["Total Items"]: map["Total Items"]+ quantity, [itemName]: (map[itemName] ?? 0) + quantity };
             });
           });
           return { id: doc.id, ...data } as Order;
-        }),
+        })
       );
       setAnalytics(map);
       setLoading(false);
@@ -1031,7 +963,6 @@ function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
             <Table.Th>Food</Table.Th>
             <Table.Th>Drinks</Table.Th>
             <Table.Th>Specialty</Table.Th>
-            <Table.Th>ID (Debug)</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -1046,7 +977,6 @@ function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
               <Table.Td>{itemsToString(order.categories["Food"]?.items)}</Table.Td>
               <Table.Td>{itemsToString(order.categories["Drinks"]?.items)}</Table.Td>
               <Table.Td>{itemsToString(order.categories["Specialty"]?.items)}</Table.Td>
-              <Table.Td>{order.id ?? "-"}</Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>
