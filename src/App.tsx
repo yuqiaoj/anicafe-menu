@@ -103,14 +103,6 @@ interface Specialty {
   items: { [itemName: string]: { quantity: number } };
 }
 
-type CashierFormValues = {
-  number: number | null;
-  notes: string;
-  discount: number;
-  zone: string;
-  items: Record<string, Record<string, number>>;
-};
-
 const zoneToColor = (zone: string) => {
   switch (zone) {
     case "Bar":
@@ -313,7 +305,13 @@ function ServerPage() {
 }
 
 function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder: (order: Order) => Promise<void> }) {
-  const form = useForm<CashierFormValues>({
+  const form = useForm<{
+    number: number | null;
+    notes: string;
+    discount: number;
+    zone: string;
+    items: Record<string, Record<string, number>>;
+  }>({
     mode: "uncontrolled",
     initialValues: {
       number: null,
@@ -336,16 +334,18 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
   });
 
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
-  const [reviewOrderNumber, setReviewOrderNumber] = useState<number | null>(null);
-  const [reviewNotes, setReviewNotes] = useState("");
-  const [reviewZone, setReviewZone] = useState<string>("Undecided");
-  const [reviewDiscount, setReviewDiscount] = useState<number>(0);
+  const [reviewOrder, setReviewOrder] = useState<Order>({
+    number: 0,
+    price: 0,
+    discount: 0,
+    notes: "",
+    completed: false,
+    zone: "Undecided",
+    categories: {},
+  });
 
   const handleSubmit = (values: typeof form.values) => {
-    setReviewOrderNumber(values.number ?? null);
-    setReviewNotes(values.notes);
-    setReviewZone(values.zone ?? "Undecided");
-    setReviewDiscount(values.discount ?? 0);
+    setReviewOrder(makeOrder(values));
     setReviewModalOpen(true);
   };
 
@@ -526,8 +526,14 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
             <NumberInput
               label="Order Number"
               min={0}
-              value={reviewOrderNumber ?? undefined}
-              onChange={(value: string | number) => setReviewOrderNumber(typeof value === "number" ? value : null)}
+              value={reviewOrder.number}
+              onChange={(value: string | number) => {
+                const parsed = typeof value === "number" ? value : value === "" ? 0 : parseFloat(value);
+                setReviewOrder({
+                  ...reviewOrder,
+                  number: Number.isNaN(parsed) ? 0 : parsed,
+                });
+              }}
             />
             <NumberInput
               label="Apply Discount"
@@ -536,19 +542,24 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
               fixedDecimalScale={true}
               thousandSeparator=","
               prefix="$"
-              value={reviewDiscount}
-              onChange={(val: string | number) => setReviewDiscount(typeof val === "string" ? parseFloat(val) : val)}
+              value={reviewOrder.discount}
+              onChange={(val: string | number) => {
+                setReviewOrder({
+                  ...reviewOrder,
+                  discount: typeof val === "number" ? val : val === "" ? 0 : parseFloat(val),
+                });
+              }}
             />
             <Select
               label="Seating Zone"
               data={["Bar", "Cashier", "Stage", "Undecided", "Volunteer"]}
-              value={reviewZone}
-              onChange={(val) => setReviewZone(val ?? "Undecided")}
+              value={reviewOrder.zone}
+              onChange={(val) => setReviewOrder({ ...reviewOrder, zone: val ?? "Undecided" })}
             />
             <TextInput
               label="Notes"
-              value={reviewNotes}
-              onChange={(event) => setReviewNotes(event.currentTarget.value)}
+              value={reviewOrder.notes}
+              onChange={(event) => setReviewOrder({ ...reviewOrder, notes: event.currentTarget.value })}
             />
           </Group>
 
@@ -556,24 +567,16 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
             <strong>Total Cost:</strong> {formatPrice(total)}
           </Text>
 
-          <OrderCard
-            order={makeOrder({
-              ...form.values,
-              number: reviewOrderNumber ?? form.values.number,
-              notes: reviewNotes,
-              zone: reviewZone,
-              discount: reviewDiscount ?? form.values.discount,
-            } as CashierFormValues)}
-          />
+          <OrderCard order={reviewOrder} />
 
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
             <Button
               variant="outline"
               onClick={() => {
-                form.setFieldValue("number", reviewOrderNumber);
-                form.setFieldValue("notes", reviewNotes);
-                form.setFieldValue("zone", reviewZone);
-                form.setFieldValue("discount", reviewDiscount);
+                form.setFieldValue("number", reviewOrder.number);
+                form.setFieldValue("notes", reviewOrder.notes);
+                form.setFieldValue("zone", reviewOrder.zone ?? "Undecided");
+                form.setFieldValue("discount", reviewOrder.discount);
                 setReviewModalOpen(false);
               }}
             >
@@ -582,19 +585,11 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
 
             <Button
               onClick={async () => {
-                await submitOrder(
-                  makeOrder({
-                    ...form.values,
-                    number: reviewOrderNumber!,
-                    notes: reviewNotes,
-                    zone: reviewZone,
-                    discount: reviewDiscount,
-                  } as CashierFormValues),
-                );
+                await submitOrder(reviewOrder);
                 form.reset();
                 setReviewModalOpen(false);
               }}
-              disabled={reviewOrderNumber === null || reviewOrderNumber <= 0}
+              disabled={reviewOrder.number === 0}
             >
               Confirm
             </Button>
@@ -969,15 +964,19 @@ function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
           const data = doc.data() as Order;
           map["Total Orders"]++;
           map["Total Revenue"] += data.price;
-          Object.values(data.categories).forEach((category) => {
-            Object.entries(category.items).forEach(([itemName, { quantity }]) => {
-              map = {
-                ...map,
-                ["Total Items"]: map["Total Items"] + quantity,
-                [itemName]: (map[itemName] ?? 0) + quantity,
-              };
+          try {
+            Object.values(data.categories).forEach((category) => {
+              Object.entries(category.items).forEach(([itemName, { quantity }]) => {
+                map = {
+                  ...map,
+                  ["Total Items"]: map["Total Items"] + quantity,
+                  [itemName]: (map[itemName] ?? 0) + quantity,
+                };
+              });
             });
-          });
+          } catch (e) {
+            console.error("Error processing order:", data, e);
+          }
           return { id: doc.id, ...data } as Order;
         }),
       );
