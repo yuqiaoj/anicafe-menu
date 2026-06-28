@@ -308,7 +308,13 @@ function ServerPage() {
 }
 
 function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder: (order: Order) => Promise<void> }) {
-  const form = useForm({
+  const form = useForm<{
+    number: number | null;
+    notes: string;
+    discount: number;
+    zone: string;
+    items: Record<string, Record<string, number>>;
+  }>({
     mode: "uncontrolled",
     initialValues: {
       number: null,
@@ -331,23 +337,20 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
     },
   });
 
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewOrder, setReviewOrder] = useState<Order>({
+    number: 0,
+    price: 0,
+    discount: 0,
+    notes: "",
+    completed: false,
+    zone: "Undecided",
+    categories: {},
+  });
+
   const handleSubmit = (values: typeof form.values) => {
-    const newOrder = makeOrder(values);
-    modals.openConfirmModal({
-      title: "Review Order",
-      children: (
-        <Stack>
-          <Text size="sm">Please confirm that the order details are correct:</Text>
-          <OrderCard order={newOrder} />
-        </Stack>
-      ),
-      labels: { confirm: "Confirm", cancel: "Cancel" },
-      onCancel: () => {},
-      onConfirm: () => {
-        submitOrder(newOrder);
-        form.reset();
-      },
-    });
+    setReviewOrder(makeOrder(values));
+    setReviewModalOpen(true);
   };
 
   const itemPriceMap = Object.fromEntries(
@@ -521,6 +524,83 @@ function CashierPage({ menu, submitOrder }: { menu: MenuCategory[]; submitOrder:
           </Group>
         </Card.Section>
       </form>
+      <Modal opened={reviewModalOpen} onClose={() => setReviewModalOpen(false)} title="Review Order" centered size="xl">
+        <Stack>
+          <Text size="sm">Edit order details before confirming:</Text>
+          <Group grow>
+            <NumberInput
+              label="Order Number"
+              min={0}
+              value={reviewOrder.number}
+              onChange={(value: string | number) => {
+                const parsed = typeof value === "number" ? value : value === "" ? 0 : parseFloat(value);
+                setReviewOrder({
+                  ...reviewOrder,
+                  number: Number.isNaN(parsed) ? 0 : parsed,
+                });
+              }}
+            />
+            <NumberInput
+              label="Apply Discount"
+              min={0}
+              decimalScale={2}
+              fixedDecimalScale={true}
+              thousandSeparator=","
+              prefix="$"
+              value={reviewOrder.discount}
+              onChange={(val: string | number) => {
+                setReviewOrder({
+                  ...reviewOrder,
+                  discount: typeof val === "number" ? val : val === "" ? 0 : parseFloat(val),
+                });
+              }}
+            />
+            <Select
+              label="Seating Zone"
+              data={["Bar", "Cashier", "Stage", "Undecided", "Volunteer"]}
+              value={reviewOrder.zone}
+              onChange={(val) => setReviewOrder({ ...reviewOrder, zone: val ?? "Undecided" })}
+            />
+            <TextInput
+              label="Notes"
+              value={reviewOrder.notes}
+              onChange={(event) => setReviewOrder({ ...reviewOrder, notes: event.currentTarget.value })}
+            />
+          </Group>
+
+          <Text>
+            <strong>Total Cost:</strong> {formatPrice(total)}
+          </Text>
+
+          <OrderCard order={reviewOrder} />
+
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                form.setFieldValue("number", reviewOrder.number);
+                form.setFieldValue("notes", reviewOrder.notes);
+                form.setFieldValue("zone", reviewOrder.zone ?? "Undecided");
+                form.setFieldValue("discount", reviewOrder.discount);
+                setReviewModalOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              onClick={async () => {
+                await submitOrder(reviewOrder);
+                form.reset();
+                setReviewModalOpen(false);
+              }}
+              disabled={reviewOrder.number === 0}
+            >
+              Confirm
+            </Button>
+          </div>
+        </Stack>
+      </Modal>
     </Card>
   );
 }
@@ -905,11 +985,19 @@ function AllOrdersPage({ menu }: { menu: MenuCategory[] }) {
           const data = doc.data() as Order;
           map["Total Orders"]++;
           map["Total Revenue"] += data.price;
-          Object.values(data.categories).forEach((category) => {
-            Object.entries(category.items).forEach(([itemName, { quantity }]) => {
-              map = { ...map, ["Total Items"]: map["Total Items"]+ quantity, [itemName]: (map[itemName] ?? 0) + quantity };
+          try {
+            Object.values(data.categories).forEach((category) => {
+              Object.entries(category.items).forEach(([itemName, { quantity }]) => {
+                map = {
+                  ...map,
+                  ["Total Items"]: map["Total Items"] + quantity,
+                  [itemName]: (map[itemName] ?? 0) + quantity,
+                };
+              });
             });
-          });
+          } catch (e) {
+            console.error("Error processing order:", data, e);
+          }
           return { id: doc.id, ...data } as Order;
         })
       );
