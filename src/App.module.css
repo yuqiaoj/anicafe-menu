@@ -20,22 +20,45 @@
 }
 
 .cashSubmit {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
-  width: 100%;
+  flex-wrap: wrap;
+  gap: var(--mantine-spacing-sm);
+  width: auto;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--mantine-color-default-border);
+  border-radius: 0 0 var(--mantine-radius-md) var(--mantine-radius-md);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 
+:global([data-mantine-color-scheme="light"]) .cashSubmit {
+  background-color: var(--mantine-color-white);
+}
+
+:global([data-mantine-color-scheme="dark"]) .cashSubmit {
+  background-color: var(--mantine-color-dark-6);
+}
+
+/* Match the width of the touch controls. */
 .numberButtonContainer {
-  width: 152px;
+  width: 136px;
   display: flex;
   justify-content: flex-end;
+}
+
+.stepButton {
+  width: 42px;
+  padding: 0;
 }
 
 .numberButtonInput {
   border-left: 0;
   border-right: 0;
   border-radius: 0;
-  width: 40px;
+  width: 44px;
+  padding: 0;
   text-align: center;
 }

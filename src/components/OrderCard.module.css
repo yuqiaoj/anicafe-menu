@@ -1,0 +1,27 @@
+.flash {
+  --flash-color: var(--mantine-color-blue-filled);
+  animation: flashPulse 1.2s ease-in-out infinite;
+}
+
+.flash[data-flash="ready"] {
+  --flash-color: var(--mantine-color-green-filled);
+}
+
+@keyframes flashPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--flash-color);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px var(--flash-color),
+      0 0 24px 6px var(--flash-color);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash {
+    animation: none;
+    box-shadow: 0 0 0 4px var(--flash-color);
+  }
+}
