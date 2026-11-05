@@ -2,11 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Anicafe Menu System</title>
-    <script type="module" crossorigin src="/anicafe-menu/assets/index-4cAiusyS.js"></script>
-    <link rel="stylesheet" crossorigin href="/anicafe-menu/assets/index-BgEnrBiF.css">
+    <!-- Apply the saved light/dark choice before React loads, so the page doesn't flash -->
+    <script>
+      try {
+        var scheme = localStorage.getItem("mantine-color-scheme-value");
+        document.documentElement.setAttribute("data-mantine-color-scheme", scheme === "light" ? "light" : "dark");
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="/anicafe-menu/assets/index-GbuzO8UA.js"></script>
+    <link rel="stylesheet" crossorigin href="/anicafe-menu/assets/index-DGvXKsBA.css">
   </head>
   <body>
     <div id="root"></div>
